@@ -32,9 +32,11 @@ let forwardingData = {
   startId: null,
   endId: null,
   lastSuccessfulId: null,
+  currentMessageId: null,  // Track which message is being processed NOW
   totalToForward: 0,
   forwardedCount: 0,
-  isActive: false
+  isActive: false,
+  sentMessages: {} // Track all successfully sent messages by ID
 };
 
 const progressFile = 'forwarding_progress.json';
@@ -47,6 +49,7 @@ function loadProgress() {
       const saved = JSON.parse(data);
       forwardingData = { ...forwardingData, ...saved };
       console.log(`Loaded progress: ${forwardingData.forwardedCount} of ${forwardingData.totalToForward} messages forwarded`);
+      console.log(`Last successful: ${forwardingData.lastSuccessfulId}, Currently processing: ${forwardingData.currentMessageId}`);
       return true;
     } catch (e) {
       console.log('Could not load progress file');
@@ -64,9 +67,11 @@ function saveProgress() {
     startId: forwardingData.startId,
     endId: forwardingData.endId,
     lastSuccessfulId: forwardingData.lastSuccessfulId,
+    currentMessageId: forwardingData.currentMessageId,
     totalToForward: forwardingData.totalToForward,
     forwardedCount: forwardingData.forwardedCount,
-    isActive: forwardingData.isActive
+    isActive: forwardingData.isActive,
+    sentMessages: forwardingData.sentMessages
   };
   fs.writeFileSync(progressFile, JSON.stringify(dataToSave, null, 2));
 }
@@ -101,12 +106,14 @@ async function forwardMessagesInRange(chatId, sourceChatId, destinationChatId, s
   } else {
     forwardingData.forwardedCount = 0;
     forwardingData.lastSuccessfulId = null;
+    forwardingData.currentMessageId = null;
+    forwardingData.sentMessages = {};
     saveProgress();
   }
 
-  const messageDelay = 150;       // 150ms between each message (slower for 7k messages)
-  const retryDelay = 5000;        // 5s wait on temporary error
-  const floodWaitDelay = 45000;   // 45s on rate limit
+  const messageDelay = 150;       // 150ms between each message
+  const retryDelay = 2000;        // 2s wait on temporary error
+  const floodWaitDelay = 50000;   // 50s on rate limit
 
   let consecutiveErrors = 0;
 
@@ -117,6 +124,18 @@ async function forwardMessagesInRange(chatId, sourceChatId, destinationChatId, s
       saveProgress();
       break;
     }
+
+    // Skip if already sent successfully
+    if (forwardingData.sentMessages[messageId]) {
+      console.log(`⏭️  Skipping message ${messageId} (already sent)`);
+      forwardingData.currentMessageId = messageId;
+      saveProgress();
+      continue;
+    }
+
+    // Mark this message as currently being processed
+    forwardingData.currentMessageId = messageId;
+    saveProgress(); // Save BEFORE attempting to send
 
     let success = false;
     let attempts = 0;
@@ -129,18 +148,22 @@ async function forwardMessagesInRange(chatId, sourceChatId, destinationChatId, s
           disable_notification: true 
         });
         
+        // Mark as successfully sent
+        forwardingData.sentMessages[messageId] = true;
         forwardingData.lastSuccessfulId = messageId;
         forwardingData.forwardedCount++;
         consecutiveErrors = 0;
         success = true;
 
-        // Save progress every message
+        // Save progress immediately after success
         saveProgress();
+
+        console.log(`✅ Message ${messageId} sent successfully (attempt ${attempts})`);
 
         // Log progress every 100 messages
         if (forwardingData.forwardedCount % 100 === 0) {
           const percent = Math.round((forwardingData.forwardedCount / forwardingData.totalToForward) * 100);
-          console.log(`✅ Progress: ${forwardingData.forwardedCount}/${forwardingData.totalToForward} (${percent}%)`);
+          console.log(`📊 Progress: ${forwardingData.forwardedCount}/${forwardingData.totalToForward} (${percent}%)`);
           await bot.sendMessage(chatId, `📊 Progress: ${forwardingData.forwardedCount}/${forwardingData.totalToForward} messages`);
         }
 
@@ -150,36 +173,47 @@ async function forwardMessagesInRange(chatId, sourceChatId, destinationChatId, s
         const errorCode = error.response?.statusCode;
         const errorMsg = error.message || 'Unknown error';
 
-        console.error(`Error on message ${messageId} (attempt ${attempts}/${maxAttempts}): ${errorMsg}`);
+        console.error(`❌ Error on message ${messageId} (attempt ${attempts}/${maxAttempts}): [${errorCode}] ${errorMsg}`);
 
         if (errorCode === 429) {
-          // Rate limit - must wait
-          const retryAfter = error.response?.headers?.['retry-after'] || 45;
-          const waitTime = parseInt(retryAfter) * 1000 + 5000; // Add 5s buffer
-          console.log(`🔴 Rate limited! Waiting ${waitTime / 1000}s before retry...`);
+          // Rate limit - save progress and wait
+          saveProgress(); // Save before waiting
+          const retryAfter = error.response?.headers?.['retry-after'] || 50;
+          const waitTime = parseInt(retryAfter) * 1000 + 5000;
+          console.log(`🔴 Rate limited! Waiting ${waitTime / 1000}s before retry on message ${messageId}...`);
           await bot.sendMessage(chatId, `⏱️ Rate limited! Waiting ${waitTime / 1000}s... (message ${messageId})`);
           await delay(waitTime);
+          // Continue to retry loop
           
         } else if (errorCode === 400 || errorCode === 403) {
-          // Bad request or forbidden - skip this message
-          console.log(`⚠️ Message ${messageId} cannot be forwarded (error ${errorCode}). Skipping...`);
-          success = true; // Skip this message
-          forwardingData.forwardedCount++;
+          // Message doesn't exist or can't be accessed - log but retry next time
+          console.log(`⚠️ Message ${messageId} cannot be forwarded (error ${errorCode}). Will retry on resume...`);
+          forwardingData.forwardedCount++; // Count as processed but NOT sent
           forwardingData.lastSuccessfulId = messageId;
           saveProgress();
+          success = true; // Don't retry now, but will retry on resume
+          
+        } else if (errorCode === 404) {
+          // Message not found - log but retry next time
+          console.log(`⚠️ Message ${messageId} not found. Will retry on resume...`);
+          forwardingData.forwardedCount++; // Count as processed but NOT sent
+          forwardingData.lastSuccessfulId = messageId;
+          saveProgress();
+          success = true; // Don't retry now, but will retry on resume
           
         } else {
           // Other temporary error - retry
           consecutiveErrors++;
           if (attempts < maxAttempts) {
-            console.log(`⏳ Temporary error on message ${messageId}. Waiting ${retryDelay}ms before retry...`);
+            console.log(`⏳ Temporary error on message ${messageId}. Waiting ${retryDelay}ms before retry ${attempts}/${maxAttempts}...`);
+            saveProgress(); // Save before waiting
             await delay(retryDelay);
           }
         }
 
-        // If too many consecutive errors, stop to prevent infinite loop
+        // If too many consecutive errors, stop
         if (consecutiveErrors > 3) {
-          await bot.sendMessage(chatId, `❌ Too many errors. Stopped at message ${messageId}. Use /resume to continue.`);
+          await bot.sendMessage(chatId, `❌ Too many consecutive errors. Stopped at message ${messageId}. Use /resume to continue.`);
           forwardingData.isActive = false;
           saveProgress();
           isForwarding = false;
@@ -199,8 +233,12 @@ async function forwardMessagesInRange(chatId, sourceChatId, destinationChatId, s
 
   // All done!
   await bot.sendMessage(chatId, `✅ 🎉 All ${forwardingData.forwardedCount} messages forwarded successfully!`);
-  fs.unlinkSync(progressFile);
+  if (fs.existsSync(progressFile)) {
+    fs.unlinkSync(progressFile);
+  }
   forwardingData.lastSuccessfulId = null;
+  forwardingData.currentMessageId = null;
+  forwardingData.sentMessages = {};
   forwardingData.isActive = false;
   isForwarding = false;
 }
