@@ -17,7 +17,7 @@ const app = express();
 const ownerUserId = parseInt(process.env.OWNER_USER_ID) || 6923915798; // Replace with your user ID
 const authorizedUsers = {}; // Object to store authorized user IDs and their data
 
-const startMessage = "Welcome to 𝐒𝐏𝐘 𝐅𝐎𝐑𝐖𝐀𝐑𝐃 𝐁𝐎𝐓..."; // Your start message
+const startMessage = "Welcome to �𝐡𝐮𝐠𝐚𝐦 𝐅𝐎𝐑𝐖𝐀𝐑𝐃𝐈𝐍𝐆..."; // Your start message
 
 // Load authorized users data from file if it exists
 const authorizedUsersFile = 'authorized_users.json';
@@ -289,8 +289,8 @@ bot.onText(/\/start/, async (msg) => {
   await bot.sendMessage(chatId, startMessage, {
     reply_markup: {
       inline_keyboard: [
-        [{ text: '𝙊𝙬𝙣𝙚𝙧', url: 'https://t.me/gazabho' }],
-        [{ text: '𝙂𝙚𝙩 𝙔𝙤𝙪𝙧𝙨𝙚𝙡𝙛 𝘼𝙪𝙩𝙝𝙤𝙧𝙞𝙯𝙚𝙙', url: 'https://t.me/dev_gagan' }],
+        [{ text: '𝙊𝙬𝙣𝙚𝙧', url: 'https://t.me/chug999' }],
+        [{ text: '𝙂𝙚𝙩 𝙔𝙤𝙪𝙧𝙨𝙚𝙡𝙛 𝘼𝙪𝙩𝙝𝙤𝙧𝙞𝙯𝙚𝙙', url: 'https://t.me/chug999' }],
       ],
     },
   });
