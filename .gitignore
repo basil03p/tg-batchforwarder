@@ -1,0 +1,7 @@
+node_modules/
+.env
+authorized_users.json
+forwarding_progress.json
+failed_messages.json
+.DS_Store
+*.log
