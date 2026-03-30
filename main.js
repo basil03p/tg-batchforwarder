@@ -40,6 +40,30 @@ let forwardingData = {
 };
 
 const progressFile = 'forwarding_progress.json';
+const presetsFile = 'channel_presets.json';
+
+let channelPresets = {}; // Object to store channel presets
+
+// Load presets if they exist
+function loadPresets() {
+  if (fs.existsSync(presetsFile)) {
+    try {
+      const data = fs.readFileSync(presetsFile, 'utf8');
+      channelPresets = JSON.parse(data);
+      console.log('Loaded channel presets');
+      return true;
+    } catch (e) {
+      console.log('Could not load presets file');
+      return false;
+    }
+  }
+  return false;
+}
+
+// Save presets to file
+function savePresets() {
+  fs.writeFileSync(presetsFile, JSON.stringify(channelPresets, null, 2));
+}
 
 // Load progress if it exists
 function loadProgress() {
@@ -78,6 +102,7 @@ function saveProgress() {
 
 // Load existing progress on startup
 loadProgress();
+loadPresets();
 
 let isForwarding = false;
 
@@ -284,6 +309,77 @@ bot.onText(/\/owner/, (msg) => {
   }
 });
 
+// Preset channel management
+bot.onText(/\/preset/, async (msg) => {
+  const chatId = msg.chat.id;
+  const text = msg.text.trim();
+
+  if (!authorizedUsers[msg.from.id] && msg.from.id !== ownerUserId) {
+    bot.sendMessage(chatId, 'You are not authorized to perform this action.');
+    return;
+  }
+
+  if (text === '/preset') {
+    // Show help
+    const presetList = Object.keys(channelPresets).length > 0 
+      ? Object.entries(channelPresets).map(([name, data]) => `• ${name}: ${data.sourceChatId} → ${data.destinationChatId}`).join('\n')
+      : 'No presets saved yet.';
+    
+    bot.sendMessage(chatId, 
+      `📋 *Preset Channels*\n\n${presetList}\n\n` +
+      `Commands:\n` +
+      `/preset add <name> <source> <dest> - Add preset\n` +
+      `/preset list - Show all presets\n` +
+      `/preset delete <name> - Delete preset\n` +
+      `/forwardpreset <name> <start> <end> - Use preset to forward`, 
+      { parse_mode: 'Markdown' }
+    );
+  } else if (text.startsWith('/preset add ')) {
+    const parts = text.replace('/preset add ', '').split(' ');
+    if (parts.length < 3) {
+      bot.sendMessage(chatId, '❌ Usage: /preset add <name> <source_id> <dest_id>');
+      return;
+    }
+
+    const presetName = parts[0];
+    const sourceId = parseInt(parts[1]);
+    const destId = parseInt(parts[2]);
+
+    if (isNaN(sourceId) || isNaN(destId)) {
+      bot.sendMessage(chatId, '❌ Source and destination IDs must be numbers.');
+      return;
+    }
+
+    channelPresets[presetName] = {
+      sourceChatId: sourceId,
+      destinationChatId: destId
+    };
+    savePresets();
+    bot.sendMessage(chatId, `✅ Preset *${presetName}* added: ${sourceId} → ${destId}`, { parse_mode: 'Markdown' });
+
+  } else if (text.startsWith('/preset delete ')) {
+    const presetName = text.replace('/preset delete ', '').trim();
+    
+    if (channelPresets[presetName]) {
+      delete channelPresets[presetName];
+      savePresets();
+      bot.sendMessage(chatId, `✅ Preset *${presetName}* deleted.`, { parse_mode: 'Markdown' });
+    } else {
+      bot.sendMessage(chatId, `❌ Preset *${presetName}* not found.`, { parse_mode: 'Markdown' });
+    }
+
+  } else if (text === '/preset list') {
+    if (Object.keys(channelPresets).length === 0) {
+      bot.sendMessage(chatId, '📭 No presets saved yet.\nUse: /preset add <name> <source> <dest>');
+    } else {
+      const list = Object.entries(channelPresets)
+        .map(([name, data]) => `• *${name}*: \`${data.sourceChatId}\` → \`${data.destinationChatId}\``)
+        .join('\n');
+      bot.sendMessage(chatId, `📋 *Saved Presets*\n\n${list}`, { parse_mode: 'Markdown' });
+    }
+  }
+});
+
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   await bot.sendMessage(chatId, startMessage, {
@@ -349,6 +445,71 @@ bot.onText(/\/forward/, async (msg) => {
               console.error('Error forwarding messages:', error);
             });
         });
+      });
+    });
+  });
+});
+
+bot.onText(/\/forwardpreset/, async (msg) => {
+  const chatId = msg.chat.id;
+
+  if (!authorizedUsers[msg.from.id]) {
+    bot.sendMessage(chatId, 'You are not authorized to perform this action.');
+    return;
+  }
+
+  if (Object.keys(channelPresets).length === 0) {
+    bot.sendMessage(chatId, '❌ No presets available. Create one with: /preset add <name> <source> <dest>');
+    return;
+  }
+
+  const presetList = Object.keys(channelPresets).map(name => `• ${name}`).join('\n');
+  await bot.sendMessage(chatId, `📋 Available presets:\n${presetList}\n\nPlease provide the preset name:`);
+
+  bot.once('message', (presetMessage) => {
+    const presetName = presetMessage.text.trim();
+    const preset = channelPresets[presetName];
+
+    if (!preset) {
+      bot.sendMessage(chatId, `❌ Preset "${presetName}" not found.`);
+      return;
+    }
+
+    bot.sendMessage(chatId, `✅ Preset selected: *${presetName}*\n${preset.sourceChatId} → ${preset.destinationChatId}\n\nPlease provide the start message ID (integer):`, { parse_mode: 'Markdown' });
+
+    bot.once('message', (startMessage) => {
+      const startId = parseIntegerMessage(startMessage);
+
+      if (isNaN(startId)) {
+        bot.sendMessage(chatId, 'Invalid input. Please resend the start message ID as an integer.');
+        return;
+      }
+
+      bot.sendMessage(chatId, 'Please provide the end message ID (integer):');
+
+      bot.once('message', (endMessage) => {
+        const endId = parseIntegerMessage(endMessage);
+
+        if (isNaN(endId)) {
+          bot.sendMessage(chatId, 'Invalid input. Please resend the end message ID as an integer.');
+          return;
+        }
+
+        if (startId > endId) {
+          bot.sendMessage(chatId, '❌ Start ID must be less than or equal to end ID.');
+          return;
+        }
+
+        bot.sendMessage(chatId, `🚀 Starting forward from preset *${presetName}*\nMessages: ${startId} to ${endId}`, { parse_mode: 'Markdown' });
+
+        forwardMessagesInRange(chatId, preset.sourceChatId, preset.destinationChatId, startId, endId)
+          .then(() => {
+            bot.sendMessage(chatId, '✅ Forwarded messages using preset');
+          })
+          .catch((error) => {
+            bot.sendMessage(chatId, 'Error forwarding messages. Please try again later.');
+            console.error('Error forwarding messages:', error);
+          });
       });
     });
   });
