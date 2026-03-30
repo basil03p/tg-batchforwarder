@@ -327,69 +327,301 @@ bot.onText(/\/preset/, async (msg) => {
     
     bot.sendMessage(chatId, 
       `📋 *Preset Channels*\n\n${presetList}\n\n` +
-      `Commands:\n` +
-      `/preset add <name> <source> <dest> - Add preset\n` +
+      `What would you like to do?\n` +
       `/preset list - Show all presets\n` +
-      `/preset delete <name> - Delete preset\n` +
-      `/forwardpreset <name> <start> <end> - Use preset to forward`, 
+      `/preset add - Add new preset\n` +
+      `/preset delete - Delete preset`, 
       { parse_mode: 'Markdown' }
     );
-  } else if (text.startsWith('/preset add ')) {
-    const parts = text.replace('/preset add ', '').split(' ');
-    if (parts.length < 3) {
-      bot.sendMessage(chatId, '❌ Usage: /preset add <name> <source_id> <dest_id>');
-      return;
-    }
-
-    const presetName = parts[0];
-    const sourceId = parseInt(parts[1]);
-    const destId = parseInt(parts[2]);
-
-    if (isNaN(sourceId) || isNaN(destId)) {
-      bot.sendMessage(chatId, '❌ Source and destination IDs must be numbers.');
-      return;
-    }
-
-    channelPresets[presetName] = {
-      sourceChatId: sourceId,
-      destinationChatId: destId
-    };
-    savePresets();
-    bot.sendMessage(chatId, `✅ Preset *${presetName}* added: ${sourceId} → ${destId}`, { parse_mode: 'Markdown' });
-
-  } else if (text.startsWith('/preset delete ')) {
-    const presetName = text.replace('/preset delete ', '').trim();
-    
-    if (channelPresets[presetName]) {
-      delete channelPresets[presetName];
-      savePresets();
-      bot.sendMessage(chatId, `✅ Preset *${presetName}* deleted.`, { parse_mode: 'Markdown' });
-    } else {
-      bot.sendMessage(chatId, `❌ Preset *${presetName}* not found.`, { parse_mode: 'Markdown' });
-    }
-
   } else if (text === '/preset list') {
     if (Object.keys(channelPresets).length === 0) {
-      bot.sendMessage(chatId, '📭 No presets saved yet.\nUse: /preset add <name> <source> <dest>');
+      bot.sendMessage(chatId, '📭 No presets saved yet.\nUse: /preset add');
     } else {
       const list = Object.entries(channelPresets)
         .map(([name, data]) => `• *${name}*: \`${data.sourceChatId}\` → \`${data.destinationChatId}\``)
         .join('\n');
       bot.sendMessage(chatId, `📋 *Saved Presets*\n\n${list}`, { parse_mode: 'Markdown' });
     }
+  } else if (text === '/preset add') {
+    await bot.sendMessage(chatId, 'Please provide a name for the preset:');
+    bot.once('message', (nameMessage) => {
+      const presetName = nameMessage.text.trim();
+
+      if (channelPresets[presetName]) {
+        bot.sendMessage(chatId, `❌ Preset *${presetName}* already exists.`, { parse_mode: 'Markdown' });
+        return;
+      }
+
+      bot.sendMessage(chatId, 'Now provide the source chat ID (integer):');
+      bot.once('message', (sourceMessage) => {
+        const sourceId = parseInt(sourceMessage.text.trim());
+
+        if (isNaN(sourceId)) {
+          bot.sendMessage(chatId, '❌ Source ID must be a number.');
+          return;
+        }
+
+        bot.sendMessage(chatId, 'Now provide the destination chat ID (integer):');
+        bot.once('message', (destMessage) => {
+          const destId = parseInt(destMessage.text.trim());
+
+          if (isNaN(destId)) {
+            bot.sendMessage(chatId, '❌ Destination ID must be a number.');
+            return;
+          }
+
+          channelPresets[presetName] = {
+            sourceChatId: sourceId,
+            destinationChatId: destId
+          };
+          savePresets();
+          bot.sendMessage(chatId, `✅ Preset *${presetName}* added:\n\`${sourceId}\` → \`${destId}\``, { parse_mode: 'Markdown' });
+        });
+      });
+    });
+  } else if (text === '/preset delete') {
+    if (Object.keys(channelPresets).length === 0) {
+      bot.sendMessage(chatId, '❌ No presets to delete.');
+      return;
+    }
+
+    const presetList = Object.keys(channelPresets).map(name => `• ${name}`).join('\n');
+    await bot.sendMessage(chatId, `📋 Which preset to delete?\n\n${presetList}`);
+    
+    bot.once('message', (deleteMessage) => {
+      const presetName = deleteMessage.text.trim();
+      
+      if (channelPresets[presetName]) {
+        delete channelPresets[presetName];
+        savePresets();
+        bot.sendMessage(chatId, `✅ Preset *${presetName}* deleted.`, { parse_mode: 'Markdown' });
+      } else {
+        bot.sendMessage(chatId, `❌ Preset *${presetName}* not found.`, { parse_mode: 'Markdown' });
+      }
+    });
   }
 });
 
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
-  await bot.sendMessage(chatId, startMessage, {
+  const welcomeText = 
+    `🚀 *Welcome to Chugam FORWARDING*\n\n` +
+    `I can forward messages from one channel to another.\n\n` +
+    `📋 *Current Configuration:*\n` +
+    `Preset: p1\n` +
+    `Source: \`-1003302499228\`\n` +
+    `Target: \`-1003469694444\`\n`;
+
+  await bot.sendMessage(chatId, welcomeText, {
+    parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
+        [{ text: '📋 Preset Channels', callback_data: 'show_presets' }],
+        [{ text: '➕ Add Preset', callback_data: 'add_preset' }],
+        [{ text: '🚀 Forward Messages', callback_data: 'forward_messages' }],
+        [{ text: '⚙️ Manage Presets', callback_data: 'manage_presets' }],
+        [{ text: '📊 Status', callback_data: 'show_status' }],
+        [{ text: '❓ Help', callback_data: 'show_help' }],
         [{ text: '𝙊𝙬𝙣𝙚𝙧', url: 'https://t.me/chug999' }],
-        [{ text: '𝙂𝙚𝙩 𝙔𝙤𝙪𝙧𝙨𝙚𝙡𝙛 𝘼𝙪𝙩𝙝𝙤𝙧𝙞𝙯𝙚𝙙', url: 'https://t.me/chug999' }],
       ],
     },
   });
+});
+
+// Handle button callbacks
+bot.on('callback_query', async (query) => {
+  const chatId = query.message.chat.id;
+  const userId = query.from.id;
+  const data = query.data;
+
+  if (data === 'show_presets') {
+    if (Object.keys(channelPresets).length === 0) {
+      await bot.answerCallbackQuery(query.id, '📭 No presets yet!', true);
+      return;
+    }
+    const list = Object.entries(channelPresets)
+      .map(([name, d]) => `• *${name}*: \`${d.sourceChatId}\` → \`${d.destinationChatId}\``)
+      .join('\n');
+    await bot.editMessageText(`📋 *Saved Presets*\n\n${list}`, {
+      chat_id: chatId,
+      message_id: query.message.message_id,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '← Back', callback_data: 'back_to_menu' }]] }
+    });
+    await bot.answerCallbackQuery(query.id);
+
+  } else if (data === 'add_preset') {
+    if (!authorizedUsers[userId] && userId !== ownerUserId) {
+      await bot.answerCallbackQuery(query.id, '❌ Not authorized!', true);
+      return;
+    }
+    await bot.sendMessage(chatId, 'Please provide a name for the preset:');
+    bot.once('message', (nameMessage) => {
+      const presetName = nameMessage.text.trim();
+      if (channelPresets[presetName]) {
+        bot.sendMessage(chatId, `❌ Preset *${presetName}* already exists.`, { parse_mode: 'Markdown' });
+        return;
+      }
+      bot.sendMessage(chatId, 'Now provide the source chat ID:');
+      bot.once('message', (sourceMessage) => {
+        const sourceId = parseInt(sourceMessage.text.trim());
+        if (isNaN(sourceId)) {
+          bot.sendMessage(chatId, '❌ Must be a number.');
+          return;
+        }
+        bot.sendMessage(chatId, 'Now provide the destination chat ID:');
+        bot.once('message', (destMessage) => {
+          const destId = parseInt(destMessage.text.trim());
+          if (isNaN(destId)) {
+            bot.sendMessage(chatId, '❌ Must be a number.');
+            return;
+          }
+          channelPresets[presetName] = { sourceChatId: sourceId, destinationChatId: destId };
+          savePresets();
+          bot.sendMessage(chatId, `✅ Preset *${presetName}* added!`, { parse_mode: 'Markdown' });
+        });
+      });
+    });
+    await bot.answerCallbackQuery(query.id);
+
+  } else if (data === 'forward_messages') {
+    if (!authorizedUsers[userId]) {
+      await bot.answerCallbackQuery(query.id, '❌ Not authorized!', true);
+      return;
+    }
+    if (Object.keys(channelPresets).length === 0) {
+      await bot.answerCallbackQuery(query.id, '❌ No presets available!', true);
+      return;
+    }
+    const presetList = Object.keys(channelPresets).map(name => `• ${name}`).join('\n');
+    await bot.sendMessage(chatId, `📋 Available Presets:\n\n${presetList}\n\nType the preset name:`);
+    bot.once('message', (presetMessage) => {
+      const presetName = presetMessage.text.trim();
+      const preset = channelPresets[presetName];
+      if (!preset) {
+        bot.sendMessage(chatId, `❌ Preset not found.`);
+        return;
+      }
+      bot.sendMessage(chatId, `✅ Preset: *${presetName}*\n\nStart message ID:`, { parse_mode: 'Markdown' });
+      bot.once('message', (startMessage) => {
+        const startId = parseInt(startMessage.text.trim());
+        if (isNaN(startId)) {
+          bot.sendMessage(chatId, '❌ Must be a number.');
+          return;
+        }
+        bot.sendMessage(chatId, 'End message ID:');
+        bot.once('message', (endMessage) => {
+          const endId = parseInt(endMessage.text.trim());
+          if (isNaN(endId)) {
+            bot.sendMessage(chatId, '❌ Must be a number.');
+            return;
+          }
+          bot.sendMessage(chatId, `🚀 Starting forward: ${startId} to ${endId}`);
+          forwardMessagesInRange(chatId, preset.sourceChatId, preset.destinationChatId, startId, endId);
+        });
+      });
+    });
+    await bot.answerCallbackQuery(query.id);
+
+  } else if (data === 'manage_presets') {
+    if (!authorizedUsers[userId] && userId !== ownerUserId) {
+      await bot.answerCallbackQuery(query.id, '❌ Not authorized!', true);
+      return;
+    }
+    const presets = Object.keys(channelPresets);
+    if (presets.length === 0) {
+      await bot.answerCallbackQuery(query.id, '📭 No presets to manage!', true);
+      return;
+    }
+    const buttons = presets.map(p => [{ text: `🗑️ Delete ${p}`, callback_data: `delete_preset_${p}` }]);
+    buttons.push([{ text: '← Back', callback_data: 'back_to_menu' }]);
+    await bot.editMessageText('⚙️ *Manage Presets*\n\nChoose a preset to delete:', {
+      chat_id: chatId,
+      message_id: query.message.message_id,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: buttons }
+    });
+    await bot.answerCallbackQuery(query.id);
+
+  } else if (data.startsWith('delete_preset_')) {
+    if (!authorizedUsers[userId] && userId !== ownerUserId) {
+      await bot.answerCallbackQuery(query.id, '❌ Not authorized!', true);
+      return;
+    }
+    const presetName = data.replace('delete_preset_', '');
+    delete channelPresets[presetName];
+    savePresets();
+    await bot.editMessageText(`✅ Preset *${presetName}* deleted!`, {
+      chat_id: chatId,
+      message_id: query.message.message_id,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '← Back', callback_data: 'back_to_menu' }]] }
+    });
+    await bot.answerCallbackQuery(query.id);
+
+  } else if (data === 'show_status') {
+    if (forwardingData.isActive) {
+      const percent = Math.round((forwardingData.forwardedCount / forwardingData.totalToForward) * 100);
+      const status = `📊 *Status*\n\n✅ Forwarded: ${forwardingData.forwardedCount}/${forwardingData.totalToForward} (${percent}%)\n📍 Last: ${forwardingData.lastSuccessfulId}`;
+      await bot.editMessageText(status, {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '← Back', callback_data: 'back_to_menu' }]] }
+      });
+    } else {
+      const status = forwardingData.lastSuccessfulId 
+        ? `📋 *Saved Progress*\n\n✅ ${forwardingData.forwardedCount} messages forwarded\n📍 Last: ${forwardingData.lastSuccessfulId}`
+        : `📭 *No active transfer*`;
+      await bot.editMessageText(status, {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '← Back', callback_data: 'back_to_menu' }]] }
+      });
+    }
+    await bot.answerCallbackQuery(query.id);
+
+  } else if (data === 'show_help') {
+    const help = `❓ *Help*\n\n` +
+      `*Commands:*\n` +
+      `/preset - Manage presets interactively\n` +
+      `/forwardpreset - Forward with preset\n` +
+      `/forward - Manual forward\n` +
+      `/resume - Resume stopped transfer\n` +
+      `/cancel - Stop current transfer\n` +
+      `/status - Check progress\n\n` +
+      `*Presets* make it easy to save channel pairs and forward quickly!`;
+    await bot.editMessageText(help, {
+      chat_id: chatId,
+      message_id: query.message.message_id,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '← Back', callback_data: 'back_to_menu' }]] }
+    });
+    await bot.answerCallbackQuery(query.id);
+
+  } else if (data === 'back_to_menu') {
+    const welcomeText = 
+      `🚀 *Welcome to Chugam FORWARDING*\n\n` +
+      `I can forward messages from one channel to another.`;
+    await bot.editMessageText(welcomeText, {
+      chat_id: chatId,
+      message_id: query.message.message_id,
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📋 Preset Channels', callback_data: 'show_presets' }],
+          [{ text: '➕ Add Preset', callback_data: 'add_preset' }],
+          [{ text: '🚀 Forward Messages', callback_data: 'forward_messages' }],
+          [{ text: '⚙️ Manage Presets', callback_data: 'manage_presets' }],
+          [{ text: '📊 Status', callback_data: 'show_status' }],
+          [{ text: '❓ Help', callback_data: 'show_help' }],
+          [{ text: '𝙊𝙬𝙣𝙚𝙧', url: 'https://t.me/chug999' }],
+        ],
+      },
+    });
+    await bot.answerCallbackQuery(query.id);
+  }
 });
 
 bot.onText(/\/forward/, async (msg) => {
