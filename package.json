@@ -7,7 +7,7 @@
     "start": "node main.js"
   },
   "engines": {
-    "node": "14.x"
+    "node": "18.x"
   },
   "dependencies": {
     "dotenv": "^16.6.1",
